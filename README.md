@@ -63,7 +63,9 @@ The bridge listens only on `127.0.0.1:7313`, answers only requests that carry it
 
 | File | What it is |
 | --- | --- |
-| `acethewords.html` | The whole app. Open it in a browser. |
+| `acethewords.html` | The app's page. Open it in a browser (it needs the `css` and `js` folders next to it). |
+| `css/acethewords.css` | All of the app's styles. |
+| `js/` | The app's code, loaded in this order: `core` (helpers, saving, word info), `ai` (dictionary and AI requests), `memory` (memory model, planner, units), `questions`, `session` (study sessions), `ui` (screens), `askai` (the Ask AI chat), `listfile` (.atw files), `input` (photos and pasted words), `main` (start-up). |
 | `index.html` | Sends the online version's home page to the app. |
 | `bridge/acethewords-bridge.mjs` | Optional local bridge for using Codex or Claude Code. |
 | `docs/AceTheWords-User-Manual.pdf` | The illustrated user manual. |
