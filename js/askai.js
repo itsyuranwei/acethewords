@@ -47,9 +47,12 @@ const askai = {
     const el = $('#askai'); if (!el) return;
     if (!askai.open) { el.innerHTML = '<button class="askai-fab" data-act="askToggle" title="Ask AI about a word">💬 Ask AI</button>'; return; }
     const w = askai.word();
+    // A divider marks where the chat moved on to another word, since the AI only sees the turns about the word on screen.
     const msgs = askai.msgs.map((m, i) => {
       const live = askai.busy && i === askai.msgs.length - 1 && m.role === 'assistant';
-      return `<div class="askai-msg ${m.role}${live ? ' live' : ''}"${live ? ' id="askLive"' : ''}>${askai.fmt(m.label || m.content)}</div>`;
+      const moved = m.role === 'user' && i > 0 && m.about !== askai.msgs[i - 1].about;
+      return `${moved ? `<div class="askai-divider">${m.about ? `Now asking about “${esc(m.about)}”` : 'New question'}</div>` : ''}` +
+        `<div class="askai-msg ${m.role}${live ? ' live' : ''}"${live ? ' id="askLive"' : ''}>${askai.fmt(m.label || m.content)}</div>`;
     }).join('');
     const body = !gen.hasKey()
       ? '<p class="small">Ask AI needs AI set up. Connect Codex, Claude Code or DeepSeek in <a href="#settings" data-act="askToggle">Settings</a>.</p>'
@@ -70,11 +73,12 @@ const askai = {
   async send(text, label = '') {
     text = untrusted(text, ASK_MAX_INPUT);
     if (!text || askai.busy || !gen.hasKey()) return;
-    const w = askai.word();
-    askai.msgs.push({ role: 'user', content: text, ...(label ? { label } : {}) });
-    // Earlier failed replies aren't part of the conversation the AI sees; long old replies are shortened.
-    const history = askai.msgs.filter(m => !m.err).slice(-12).map(m => ({ role: m.role, content: m.content.slice(0, 1500) }));
-    const reply = { role: 'assistant', content: '' };
+    const w = askai.word(), about = w?.word || '';
+    askai.msgs.push({ role: 'user', content: text, about, ...(label ? { label } : {}) });
+    // The AI sees only the turns about the word now on screen: older ones also say "the word I'm studying" but were answered
+    // about a different word, and it would carry on with that one. Failed replies are left out and long old replies shortened.
+    const history = askai.msgs.filter(m => m.about === about && !m.err).slice(-12).map(m => ({ role: m.role, content: m.content.slice(0, 1500) }));
+    const reply = { role: 'assistant', content: '', about };
     askai.msgs.push(reply);
     askai.draft = ''; askai.busy = true; askai.render();
     const g = db.settings.grade;
