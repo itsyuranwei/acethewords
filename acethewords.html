@@ -450,7 +450,13 @@ function fixWord(k, w) {
     if (!/^https:\/\/api\.dictionaryapi\.dev\//.test(String(data.audio || ''))) data.audio = '';
   }
   const g = isObj(w.gen) ? { ...w.gen } : null;
-  if (g) { for (const f of GEN_LISTS) g[f] = arr(g[f]); g.incorrect_usages = g.incorrect_usages.filter(isObj); }
+  if (g) {
+    for (const f of GEN_LISTS) g[f] = arr(g[f]);
+    g.incorrect_usages = g.incorrect_usages.filter(isObj);
+    const strs = x => arr(x).filter(y => typeof y === 'string');
+    g.blank_items = arr(g.blank_items).filter(x => isObj(x) && typeof x.sentence === 'string')
+      .map(x => ({ sentence: x.sentence, tempting: strs(x.tempting), easy: strs(x.easy) }));
+  }
   return { ...newWord(k, typeof w.list === 'string' ? w.list : ''), ...w, word: k, mem, data, gen: g, primary: { ...primary, m: pm, d: pd } };
 }
 function fixList(name, l) {
@@ -808,11 +814,13 @@ Return a JSON object with exactly these keys:
 - "pos": part of speech of that sense
 - "simple_definition": at most 15 words a Grade ${g} student understands; do not use the target word
 - "example": one natural sentence using "${w.word}"
-- "blank_sentences": 10 different sentences in different situations, each 12–25 words. Each must be written for the exact form "${w.word}", with that word replaced by "____". Only "${w.word}" may fit, but the student must understand the whole sentence to see why: show the meaning through the situation (a cause, a result, a contrast, or how someone acts or feels). Never put the definition, a synonym or an explanation right next to the blank.
-- "blank_easy_distractors": 10 words with the same part of speech and form as "${w.word}", known to a Grade ${g} student, that fit the grammar of the sentences and suit the same general topic, so each looks possible at first glance; the context clues must rule them out. No synonyms, nothing obviously silly
-- "blank_hard_distractors": 10 words with the same part of speech and form that are tempting (same topic or a similar feeling) but are NOT synonyms and do not fit any of the sentences when read carefully
+- "blank_items": 10 objects {"sentence": "...", "tempting": [...], "easy": [...]}, each in a different situation.
+  "sentence": 12–25 words, written for the exact form "${w.word}", with that word replaced by "____". Only "${w.word}" may fit, but the student must understand the whole sentence to see why: show the meaning through the situation (a cause, a result, a contrast, or how someone acts or feels). Never put the definition, a synonym or an explanation right next to the blank.
+  "tempting": 3 words with the same part of speech and form as "${w.word}" that a student might pick at first glance (same topic or a similar feeling) but that clearly do NOT fit THIS sentence once it is read carefully.
+  "easy": 3 everyday words a Grade ${g} student knows, with the same part of speech and form, that fit the grammar of THIS sentence but clearly not its meaning.
+  Check every "tempting" and "easy" word by putting it in the blank: if the sentence would still make sense, replace it. Never use a synonym of "${w.word}" or a word from its family (like "commence" for "commencement", or "decide" for "decision").
 - "meaning_hard_distractors": 10 short, plausible but clearly WRONG definitions for "${w.word}" (for example the meanings of words it is often confused with), similar in length and style to simple_definition
-- "lookalike_words": up to 8 real English words a student could easily mistake for "${w.word}" at a glance, hardest first. Each must be the same part of speech and the same form (both plural, both past tense…) so grammar gives nothing away; look or sound very close: only 1–3 letters different, a swapped prefix or ending, or the same root (like adverse/averse, eminent/imminent, illicit/elicit); be a word a Grade ${g} student may have seen; and have a clearly DIFFERENT meaning (never a synonym, and never another form of "${w.word}"). Give fewer rather than add loosely similar words
+- "lookalike_words": up to 8 real English words a student could easily mistake for "${w.word}" at a glance, hardest first. Each must be the same part of speech and the same form (both plural, both past tense…) so grammar gives nothing away; look or sound very close: only 1–3 letters different, or a swapped prefix or ending (like adverse/averse, eminent/imminent, illicit/elicit); be a word a Grade ${g} student may have seen; and have a clearly DIFFERENT meaning (never a synonym, and never a word from the same family as "${w.word}", like "commence" for "commencement"). Give fewer rather than add loosely similar words
 - "correct_usages": 10 sentences in different situations that use "${w.word}" correctly with this meaning
 - "incorrect_usages": 10 objects {"sentence": "...", "why": "..."}: sentences that use "${w.word}" in a natural-looking but WRONG way (wrong meaning or wrong part of speech); "why" explains the mistake in at most 20 simple words`;
     return [{ role: 'system', content: system }, { role: 'user', content: user }];
@@ -853,15 +861,20 @@ ${instructions ? `Extra instructions from the parent or teacher (follow them): �
     const arr = x => (Array.isArray(x) ? x : []);
     // A wrong option that is really a synonym would be marked wrong unfairly.
     const syn = new Set((w.data?.meanings?.[w.primary.m]?.synonyms || []).map(norm));
-    const words = x => uniq(arr(x).map(str).map(s => s.toLowerCase()).filter(s => s && s !== word && !re.test(s) && !syn.has(norm(s))));
+    const words = x => uniq(arr(x).map(str).map(s => s.toLowerCase()).filter(s => s && s !== word && !re.test(s) && !syn.has(norm(s)) && !sameFamily(word, s)));
+    const blank = s => str(s).replace(/_{3,}/g, '____');
+    const items = arr(j.blank_items).filter(isObj).map(x => ({ sentence: blank(x.sentence), tempting: words(x.tempting), easy: words(x.easy) }))
+      .filter(x => x.sentence.includes('____') && !re.test(x.sentence) && x.tempting.length + x.easy.length >= 2);
     const out = {
       pos: str(j.pos).toLowerCase(),
       sense_index: Number(j.sense_index) || 0,
       simple_definition: str(j.simple_definition),
       example: re.test(str(j.example)) ? str(j.example) : '',
-      blank_sentences: arr(j.blank_sentences).map(str).map(s => s.replace(/_{3,}/g, '____')).filter(s => s.includes('____') && !re.test(s)),
-      blank_easy_distractors: words(j.blank_easy_distractors),
-      blank_hard_distractors: words(j.blank_hard_distractors),
+      // Each sentence keeps its own wrong options. The flat lists are for older code and counts only.
+      blank_items: items,
+      blank_sentences: items.map(x => x.sentence),
+      blank_easy_distractors: uniq(items.flatMap(x => x.easy)),
+      blank_hard_distractors: uniq(items.flatMap(x => x.tempting)),
       meaning_hard_distractors: uniq(arr(j.meaning_hard_distractors).map(str).filter(Boolean)),
       lookalike_words: words(j.lookalike_words),
       correct_usages: arr(j.correct_usages).map(str).filter(s => re.test(s)),
@@ -872,7 +885,7 @@ ${instructions ? `Extra instructions from the parent or teacher (follow them): �
     return out;
   },
   // Bump when the question prompt changes, so Settings can offer to rewrite older questions.
-  VERSION: 3,
+  VERSION: 4,
   outdated() { return Object.values(db.words).filter(w => w.gen && (w.genVer || 1) < gen.VERSION && info.def(w)); },
   async generate(w) {
     let best = null;
@@ -1383,6 +1396,20 @@ function looksLike(a, b) {
   let suf = 0; while (suf < a.length && suf < b.length && a[a.length - 1 - suf] === b[b.length - 1 - suf]) suf++;
   return 1 - editDistance(a, b) / Math.max(a.length, b.length, 1) + 0.5 * Math.min(pre, 4) / 4 + 0.25 * Math.min(suf, 4) / 4;
 }
+// Two forms of one word ("commence" / "commencement", "decide" / "decision"). As a wrong option such a word gives the
+// answer away or feels like a trick, so options never come from the target's family. Errs on the side of "same family":
+// a pair like "moral" / "morale" is dropped too, which only costs one candidate.
+const WORD_ENDING = /(ments?|tions?|sions?|ness|ities|ity|ives?|ally|ly|ances?|ences?|ings?|ed|ers?|able|ible|ous|ful|less|al|es|s|e|y)$/;
+function sameFamily(a, b) {
+  a = norm(a); b = norm(b);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  if (short.length >= 4 && long.startsWith(short)) return true;
+  const ra = a.replace(WORD_ENDING, ''), rb = b.replace(WORD_ENDING, '');
+  const [rs, rl] = ra.length <= rb.length ? [ra, rb] : [rb, ra];
+  return rs.length >= 4 && rl.startsWith(rs);
+}
 // Most look-alike first. The closest few are shuffled so the same three options don't come up every time.
 function closest(word, cands) {
   const sorted = cands.map(c => [c, looksLike(word, c)]).sort((x, y) => y[1] - x[1]).map(x => x[0]);
@@ -1406,24 +1433,34 @@ const qfx = {
     const c = hard
       ? [...closest(w.word, w.gen?.lookalike_words || []), ...closest(w.word, o.filter(same).map(x => x.word)), ...closest(w.word, f.filter(sameF).map(x => x.w)), ...shuffle(f).map(x => x.w)]
       : [...shuffle(o.filter(x => !same(x))).map(x => x.word), ...shuffle(f.filter(x => !sameF(x))).map(x => x.w), ...shuffle(f).map(x => x.w)];
-    return takeUnique(c, [w.word], 3);
+    return takeUnique(c.filter(x => !sameFamily(w.word, x)), [w.word], 3);
   },
-  wrongBlank(w, hard) {
+  // Wrong options for one blank sentence. Sentences written with their own options (item.tempting / item.easy) use those
+  // first: they were checked against that sentence, while a word ruled out by one sentence can fit another.
+  wrongBlank(w, hard, item = null) {
     const pos = info.pos(w), o = others(w), f = fallbackFor(w);
     const same = x => pos && info.pos(x) === pos, sameF = x => pos && x.p === pos;
     const g = w.gen || {};
-    const c = hard
-      ? [...shuffle(g.blank_hard_distractors || []), ...closest(w.word, g.lookalike_words || []), ...closest(w.word, o.filter(same).map(x => x.word)), ...shuffle(f.filter(sameF)).map(x => x.w)]
-      // Learning-phase blanks: one tempting option, then plausible words mixed with other words from the user's lists.
-      : [...shuffle(g.blank_hard_distractors || []).slice(0, 1), ...shuffle([...(g.blank_easy_distractors || []), ...o.filter(same).map(x => x.word)]),
-        ...shuffle(f.filter(sameF)).map(x => x.w), ...shuffle(f).map(x => x.w)];
-    return takeUnique(c, [w.word], 3);
+    const look = closest(w.word, g.lookalike_words || []), mine = closest(w.word, o.filter(same).map(x => x.word));
+    const c = item
+      ? hard
+        ? [...shuffle(item.tempting), ...shuffle(item.easy), ...look, ...mine, ...shuffle(f.filter(sameF)).map(x => x.w)]
+        // Learning-phase blanks: one tempting option, then clearly wrong ones.
+        : [...shuffle(item.tempting).slice(0, 1), ...shuffle(item.easy), ...mine, ...shuffle(f.filter(sameF)).map(x => x.w), ...shuffle(f).map(x => x.w)]
+      : hard
+        ? [...shuffle(g.blank_hard_distractors || []), ...look, ...mine, ...shuffle(f.filter(sameF)).map(x => x.w)]
+        : [...shuffle(g.blank_hard_distractors || []).slice(0, 1), ...shuffle([...(g.blank_easy_distractors || []), ...o.filter(same).map(x => x.word)]),
+          ...shuffle(f.filter(sameF)).map(x => x.w), ...shuffle(f).map(x => x.w)];
+    return takeUnique(c.filter(x => !sameFamily(w.word, x)), [w.word], 3);
   },
-  sentence(w) {
+  // A blank sentence, with its own wrong options when it has them: { sentence, item }.
+  blank(w) {
+    const items = w.gen?.blank_items || [];
+    if (items.length) { const item = pick(items); return { sentence: item.sentence, item }; }
     const g = w.gen?.blank_sentences || [];
-    if (g.length) return pick(g);
+    if (g.length) return { sentence: pick(g), item: null };
     const ex = info.examplesWithWord(w);
-    return ex.length ? pick(ex).replace(stemRe(w.word, 'gi'), '____') : null;
+    return ex.length ? { sentence: pick(ex).replace(stemRe(w.word, 'gi'), '____'), item: null } : null;
   },
   // Fallback misuse: another word's sentence with this word swapped in. A different part of speech makes the misuse clear.
   usageOther(w) {
@@ -1459,8 +1496,8 @@ const qfx = {
     meanHard: w => qfx.mcq('meanHard', w, {}, info.def(w), qfx.wrongDefs(w, true)),
     wordEasy: w => qfx.mcq('wordEasy', w, {}, w.word, qfx.wrongWords(w, false)),
     wordHard: w => qfx.mcq('wordHard', w, {}, w.word, qfx.wrongWords(w, true)),
-    blankEasy: w => { const s = qfx.sentence(w); return s && qfx.mcq('blankEasy', w, { sentence: s }, w.word, qfx.wrongBlank(w, false)); },
-    blankHard: w => { const s = qfx.sentence(w); return s && qfx.mcq('blankHard', w, { sentence: s }, w.word, qfx.wrongBlank(w, true)); },
+    blankEasy: w => { const b = qfx.blank(w); return b && qfx.mcq('blankEasy', w, { sentence: b.sentence }, w.word, qfx.wrongBlank(w, false, b.item)); },
+    blankHard: w => { const b = qfx.blank(w); return b && qfx.mcq('blankHard', w, { sentence: b.sentence }, w.word, qfx.wrongBlank(w, true, b.item)); },
     usage: w => {
       const g = w.gen || {};
       if (g.correct_usages?.length && g.incorrect_usages?.length) {
