@@ -323,7 +323,12 @@ const store = {
   load() {
     let d = null;
     try { d = JSON.parse(localStorage.getItem(KEY)); } catch { d = null; }
+    if (!isObj(d)) d = null;
     db = d ? { ...this.blank(), ...d, settings: { ...DEFAULT_SETTINGS, ...(d.settings || {}) } } : this.blank();
+    db.words = fixAll(db.words, fixWord);
+    db.lists = fixAll(db.lists, fixList);
+    for (const k of ['daily', 'streak', 'rt']) if (!isObj(db[k])) db[k] = this.blank()[k];
+    if (!Array.isArray(db.apiLog)) db.apiLog = [];
     // deepseek-chat is no longer offered; deepseek-flash (V4.1 Flash) replaces it.
     if (!db.settings.model || db.settings.model === 'deepseek-chat') db.settings.model = 'deepseek-flash';
     for (const [k, [lo, hi]] of Object.entries(SETTING_LIMITS)) db.settings[k] = clamp(Math.round(Number(db.settings[k]) || DEFAULT_SETTINGS[k]), lo, hi);
@@ -347,14 +352,14 @@ const store = {
   },
   importJSON(text) {
     const inc = JSON.parse(text);
-    if (!inc || typeof inc.words !== 'object') throw new Error('Not an AceTheWords backup');
+    if (!isObj(inc) || !isObj(inc.words)) throw new Error('Not an AceTheWords backup');
     let added = 0, updated = 0;
-    for (const [k, w] of Object.entries(inc.words)) {
+    for (const [k, w] of Object.entries(fixAll(inc.words, fixWord))) {
       const cur = db.words[k];
       if (!cur) { db.words[k] = w; added++; }
       else if ((w.mem?.lastReview || 0) > (cur.mem?.lastReview || 0)) { db.words[k] = w; updated++; }
     }
-    for (const [name, l] of Object.entries(inc.lists || {})) {
+    for (const [name, l] of Object.entries(fixAll(inc.lists, fixList))) {
       const cur = db.lists[name];
       if (!cur) { db.lists[name] = l; continue; }
       const have = new Set(cur.units.flat());
@@ -368,6 +373,50 @@ const store = {
     return { added, updated };
   },
 };
+
+// Saved data can come from an older version or a hand-edited backup. These fill in anything missing or damaged,
+// so one bad word or list can't stop the app from loading. Entries that aren't objects are dropped.
+const isObj = x => !!x && typeof x === 'object' && !Array.isArray(x);
+const arr = x => (Array.isArray(x) ? x : []);
+const fixAll = (o, fix) => Object.fromEntries(Object.entries(isObj(o) ? o : {}).map(([k, v]) => [k, fix(k, v)]).filter(([, v]) => v));
+const GEN_LISTS = ['blank_sentences', 'blank_easy_distractors', 'blank_hard_distractors', 'meaning_hard_distractors', 'lookalike_words', 'correct_usages', 'incorrect_usages'];
+function fixWord(k, w) {
+  if (!isObj(w)) return null;
+  const mem = { ...newMem(), ...(isObj(w.mem) ? w.mem : {}) };
+  for (const n of ['S', 'D', 'lastReview', 'reps', 'lapses']) if (!Number.isFinite(mem[n])) mem[n] = 0;
+  mem.successDays = arr(mem.successDays);
+  mem.history = arr(mem.history).filter(isObj);
+  const primary = { m: 0, d: 0, manual: false, ...(isObj(w.primary) ? w.primary : {}) };
+  // Dropping a damaged meaning or definition shifts the ones after it, so the chosen sense is followed to its new place.
+  let data = null, pm = 0, pd = 0;
+  if (isObj(w.data) && Array.isArray(w.data.meanings)) {
+    const meanings = [];
+    w.data.meanings.forEach((m, mi) => {
+      if (!isObj(m)) return;
+      const defs = [];
+      arr(m.defs).forEach((d, di) => {
+        if (!isObj(d) || typeof d.def !== 'string') return;
+        if (mi === primary.m && di === primary.d) { pm = meanings.length; pd = defs.length; }
+        defs.push(d);
+      });
+      meanings.push({ ...m, defs, synonyms: arr(m.synonyms), antonyms: arr(m.antonyms) });
+    });
+    data = { ...w.data, meanings };
+  }
+  const g = isObj(w.gen) ? { ...w.gen } : null;
+  if (g) { for (const f of GEN_LISTS) g[f] = arr(g[f]); g.incorrect_usages = g.incorrect_usages.filter(isObj); }
+  return { ...newWord(k, typeof w.list === 'string' ? w.list : ''), ...w, word: k, mem, data, gen: g, primary: { ...primary, m: pm, d: pd } };
+}
+function fixList(name, l) {
+  if (!isObj(l)) return null;
+  const us = arr(l.units).filter(Array.isArray).map(u => u.filter(k => typeof k === 'string'));
+  return {
+    ...l, name, units: us,
+    testDate: /^\d{4}-\d{2}-\d{2}$/.test(l.testDate) ? l.testDate : '',
+    unitSize: Number(l.unitSize) > 0 ? Number(l.unitSize) : Math.max(10, ...us.map(u => u.length)),
+    unlocked: clamp(Math.round(Number(l.unlocked)) || 1, 1, Math.max(1, us.length)),
+  };
+}
 
 function newMem() {
   return { S: 0, D: 0, lastReview: 0, lastDay: '', reps: 0, lapses: 0, successDays: [], memorized: false, history: [] };
