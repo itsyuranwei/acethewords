@@ -245,7 +245,9 @@ function record(w, grade, type, ms) {
 }
 
 /* ============================== "I know this word" ============================== */
-// The student says they know a word: counted as an Easy review, so it gets stronger and comes back later.
+// The student says they know a word: counted as a Good review, so it gets stronger and comes back later. Not Easy: nothing
+// has checked the claim, and Easy would put a new word's bar near full with its first question about two weeks away.
+// As Good it is about half full and comes back in a few days, where a real question confirms it.
 // It never makes a word Memorized on its own (that still takes a hard question answered right), and it
 // doesn't train the speed model, count toward the daily goal or the streak. Once a day per word, so
 // tapping it again can't keep stretching the gap.
@@ -254,7 +256,7 @@ const known = {
   mark(w) {
     if (known.markedToday(w)) return false;
     const wasNew = !w.mem.reps;
-    mem.review(w, 4, 'known', 0);
+    mem.review(w, 3, 'known', 0);
     if (wasNew) plan.countNew(inList(w, ui.scope) && ui.scope ? ui.scope : w.list);
     toast(`👍 “${w.word}” marked as known — next review ${fmtDay(dayKey(plan.dueAt(w)))}`, 'good');
     for (const n of Object.keys(w.lists)) if (units.autoUnlock(n)) toast(`🔓 A new unit in “${n}” is unlocked!`, 'good');

@@ -569,7 +569,7 @@ const ui = {
           <div class="small muted">Recent: ${m.history.slice(-12).map(h => `<span title="${TYPE_LABEL[h.type]}">${h.g === 1 ? '✗' : '✓'}</span>`).join(' ')}</div>`
           : '<p class="small muted">Not studied yet.</p>'}
       </details>
-      <div class="row" style="margin-top:16px">${info.studyable(w) ? `<button class="btn sm" data-act="markKnown" data-w="${esc(key)}" ${known.markedToday(w) ? 'disabled title="Already marked today — come back tomorrow"' : 'title="Counts as an easy review: the word gets stronger and its next review moves later"'}>✓ I know this word</button>` : ''}<button class="btn sm" data-act="resetWord" data-w="${esc(key)}">Reset progress</button><button class="btn sm danger" data-act="deleteWord" data-w="${esc(key)}">${Object.keys(w.lists).length > 1 ? 'Delete from all lists' : 'Delete word'}</button></div>
+      <div class="row" style="margin-top:16px">${info.studyable(w) ? `<button class="btn sm" data-act="markKnown" data-w="${esc(key)}" ${known.markedToday(w) ? 'disabled title="Already marked today — come back tomorrow"' : 'title="Counts as a good review: the word gets stronger and its next review moves later"'}>✓ I know this word</button>` : ''}<button class="btn sm" data-act="resetWord" data-w="${esc(key)}">Reset progress</button><button class="btn sm danger" data-act="deleteWord" data-w="${esc(key)}">${Object.keys(w.lists).length > 1 ? 'Delete from all lists' : 'Delete word'}</button></div>
     </div></div>`;
     askai.sync();
   },

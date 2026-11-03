@@ -198,7 +198,7 @@ const runner = {
   renderIntro(w, viewing = false) {
     return `<div class="qtype">${TYPE_LABEL.intro}</div>
       <div class="flash">${runner.wordHead(w)}<div class="back" style="margin-top:14px;padding-top:14px">${runner.wordFacts(w)}</div></div>
-      ${viewing ? '' : `<div class="row" style="justify-content:center;margin-top:20px"><button class="btn ghost big" data-act="introKnown" title="Skip its practice for now: counts as an easy review">✓ I already know this</button><button class="btn primary big" data-act="introNext" data-nav>Got it — next</button></div>
+      ${viewing ? '' : `<div class="row" style="justify-content:center;margin-top:20px"><button class="btn ghost big" data-act="introKnown" title="Skip its practice for now: counts as a good review">✓ I already know this</button><button class="btn primary big" data-act="introNext" data-nav>Got it — next</button></div>
       <div class="keyhint">Space, Enter or → to continue · K if you already know it${runner.prevHint()}</div>`}`;
   },
   renderCard(w, c, viewing = false) {
