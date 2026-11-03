@@ -42,6 +42,7 @@ Then open `acethewords/acethewords.html` in Chrome, Edge, Safari or Firefox.
 - **Smart scheduling** — uses FSRS-5, the spaced-repetition model behind Anki's modern scheduler, plus a hidden answer-speed signal.
 - **Optional AI** — student-friendly definitions, fill-in-the-blank and correct-usage questions, and photo import. Use the Codex or Claude Code plan you already have, or a DeepSeek API key.
 - **Private by default** — everything is saved in your own browser. Export a backup file any time.
+- **Share a list** — export any list as a `.atw` file (list → ⚙️ Edit → Export) and import it with ＋ New list → Import a list, with or without its progress.
 
 ## Use your Codex or Claude plan for AI
 
@@ -69,4 +70,4 @@ The bridge listens only on `127.0.0.1:7313`, answers only requests that carry it
 
 ## Privacy
 
-Your words and progress stay in your browser's local storage on your device. Word lookups go to the free [Dictionary API](https://dictionaryapi.dev/). If you set up AI, words (and any photos you import) are sent to the provider you chose to write questions: DeepSeek directly, or OpenAI or Anthropic through the Codex or Claude Code CLI on your computer. Keys and bridge tokens are stored only in your browser and are never included in backup exports.
+Your words and progress stay in your browser's local storage on your device. Word lookups go to the free [Dictionary API](https://dictionaryapi.dev/). The app asks GitHub for this repository's star count to show on the "Star it on GitHub" button; nothing about you or your words is sent. If you set up AI, words (and any photos you import) are sent to the provider you chose to write questions: DeepSeek directly, or OpenAI or Anthropic through the Codex or Claude Code CLI on your computer. Keys and bridge tokens are stored only in your browser and are never included in backup exports.
