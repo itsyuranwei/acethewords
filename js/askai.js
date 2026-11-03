@@ -63,10 +63,17 @@ const askai = {
         <button class="iconbtn" data-act="askToggle" aria-label="Close">✕</button></div>
       <div class="askai-msgs" id="askMsgs">${body}</div>
       ${gen.hasKey() ? `${!askai.busy && w ? `<div class="askai-chips">${askai.chips(w).map((c, i) => `<button class="btn sm" data-act="askChip" data-i="${i}">${esc(c.label)}</button>`).join('')}</div>` : ''}
-      <form class="askai-form"><input id="askInput" type="text" autocomplete="off" maxlength="${ASK_MAX_INPUT}" placeholder="${w ? `Ask about “${esc(w.word)}”…` : 'Ask about a word…'}" value="${esc(askai.draft)}">
+      <form class="askai-form"><input id="askInput" type="text" autocomplete="off" maxlength="${ASK_MAX_INPUT}" placeholder="${w ? `Ask about “${esc(w.word)}”, or just press Enter` : 'Ask about a word…'}" value="${esc(askai.draft)}">
         <button class="btn primary sm" data-act="askSend" ${askai.busy ? 'disabled' : ''}>Send</button></form>` : ''}
     </div>`;
     const box = $('#askMsgs'); box.scrollTop = box.scrollHeight;
+  },
+  // The Send button and Enter: an empty box asks for a simple explanation of the word on screen; anything typed is sent as it is.
+  submit(text) {
+    const w = askai.word();
+    if (String(text ?? '').trim() || !w) return askai.send(text);
+    const c = askai.chips(w)[0];
+    return askai.send(c.ask, c.label);
   },
   fmt: t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>'),
   // `label` is what the chat shows when it differs from what is sent (the quick-question buttons).

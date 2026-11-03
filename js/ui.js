@@ -780,7 +780,7 @@ const ui = {
     askToggle: el => { askai.toggle(); if (el.tagName === 'A') location.hash = el.getAttribute('href'); },
     askClear: () => { askai.msgs = []; askai.render(); },
     askChip: el => { const c = askai.chips(askai.word())[Number(el.dataset.i)]; if (c) askai.send(c.ask, c.label); },
-    askSend: () => askai.send($('#askInput')?.value),
+    askSend: () => askai.submit($('#askInput')?.value),
     setPrimary: el => {
       const w = db.words[el.dataset.w];
       w.primary = { m: Number(el.dataset.m), d: Number(el.dataset.d), manual: true };
@@ -1041,7 +1041,7 @@ const ui = {
   onKey(e) {
     if (store.stale) return;
     if (e.target.id === 'askInput') {
-      if (e.key === 'Enter') { e.preventDefault(); askai.send(e.target.value); } else if (e.key === 'Escape') askai.toggle();
+      if (e.key === 'Enter') { e.preventDefault(); askai.submit(e.target.value); } else if (e.key === 'Escape') askai.toggle();
       return;
     }
     if (e.target.matches?.('input, textarea, select')) {
