@@ -40,8 +40,23 @@ Then open `acethewords/acethewords.html` in Chrome, Edge, Safari or Firefox.
 - **Learn → Practice → Review** — meet new words in small batches, practice with questions that get harder as each word gets stronger, and review memorized words just before they fade.
 - **Test-date planning** — set a test date and the app spreads new words out so everything is learned and reviewed in time.
 - **Smart scheduling** — uses FSRS-5, the spaced-repetition model behind Anki's modern scheduler, plus a hidden answer-speed signal.
-- **Optional AI** — add a DeepSeek API key for student-friendly definitions, fill-in-the-blank and correct-usage questions, and photo import.
+- **Optional AI** — student-friendly definitions, fill-in-the-blank and correct-usage questions, and photo import. Use the Codex or Claude Code plan you already have, or a DeepSeek API key.
 - **Private by default** — everything is saved in your own browser. Export a backup file any time.
+
+## Use your Codex or Claude plan for AI
+
+A web page can't start programs, so a small bridge runs on your computer and passes the app's requests to the Codex CLI or Claude Code, using the login you already have. No API key needed.
+
+1. Install [Codex CLI](https://github.com/openai/codex) or [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and sign in once (run `codex` or `claude` in a terminal).
+2. Install [Node.js](https://nodejs.org) 18 or newer, then run this and leave the window open:
+
+   ```bash
+   curl -fsSLO https://raw.githubusercontent.com/itsyuranwei/acethewords/main/bridge/acethewords-bridge.mjs && node acethewords-bridge.mjs
+   ```
+
+3. In the app, open **Settings → AI**, choose Codex or Claude Code, and paste the token the bridge prints.
+
+The bridge listens only on `127.0.0.1:7313`, answers only requests that carry its token, and runs the CLI with no tools in an empty temporary folder. Chrome and Edge may ask to let the page reach devices on your local network; allow it.
 
 ## Files
 
@@ -49,8 +64,9 @@ Then open `acethewords/acethewords.html` in Chrome, Edge, Safari or Firefox.
 | --- | --- |
 | `acethewords.html` | The whole app. Open it in a browser. |
 | `index.html` | Sends the online version's home page to the app. |
+| `bridge/acethewords-bridge.mjs` | Optional local bridge for using Codex or Claude Code. |
 | `docs/AceTheWords-User-Manual.pdf` | The illustrated user manual. |
 
 ## Privacy
 
-Your words and progress stay in your browser's local storage on your device. Word lookups go to the free [Dictionary API](https://dictionaryapi.dev/). If you add a DeepSeek key, words (and any photos you import) are sent to DeepSeek to write questions; the key itself is stored only in your browser and is never included in backup exports.
+Your words and progress stay in your browser's local storage on your device. Word lookups go to the free [Dictionary API](https://dictionaryapi.dev/). If you set up AI, words (and any photos you import) are sent to the provider you chose to write questions: DeepSeek directly, or OpenAI or Anthropic through the Codex or Claude Code CLI on your computer. Keys and bridge tokens are stored only in your browser and are never included in backup exports.

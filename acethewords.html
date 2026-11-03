@@ -249,7 +249,7 @@ mark { background: color-mix(in srgb, var(--st-learning) 35%, transparent); colo
 <header class="topbar">
   <div class="wrap">
     <div class="brand"><div class="brand-dot">A</div><span class="name">AceTheWords</span></div>
-    <button class="apipill" id="apiPill" data-act="apiPanel" title="DeepSeek connection"><i></i>AI<span class="lab"></span></button>
+    <button class="apipill" id="apiPill" data-act="apiPanel" title="AI connection"><i></i>AI<span class="lab"></span></button>
     <nav class="nav" id="nav">
       <a href="#home" data-r="home">Home</a>
       <a href="#add" data-r="add">Add</a>
@@ -308,7 +308,7 @@ function stemRe(word, flags = 'i') {
 /* ============================== store ============================== */
 const KEY = 'rememberit:v1';
 const DEFAULT_SETTINGS = {
-  deepseekKey: '', model: 'deepseek-flash', grade: 11, retention: 0.9,
+  provider: 'codex', deepseekKey: '', bridgeToken: '', model: 'deepseek-flash', grade: 11, retention: 0.9,
   newPerDay: 15, dailyCap: 100, sessionSize: 20, batchSize: 8, learnChecks: 2, useSpeed: true,
 };
 // Allowed range for each number setting.
@@ -331,6 +331,8 @@ const store = {
     if (!Array.isArray(db.apiLog)) db.apiLog = [];
     // deepseek-chat is no longer offered; deepseek-flash (V4.1 Flash) replaces it.
     if (!db.settings.model || db.settings.model === 'deepseek-chat') db.settings.model = 'deepseek-flash';
+    // Saved before Codex and Claude Code were offered: keep using DeepSeek if a key was set.
+    if (!d?.settings?.provider) db.settings.provider = db.settings.deepseekKey ? 'deepseek' : DEFAULT_SETTINGS.provider;
     for (const [k, [lo, hi]] of Object.entries(SETTING_LIMITS)) db.settings[k] = clamp(Math.round(Number(db.settings[k]) || DEFAULT_SETTINGS[k]), lo, hi);
     // Version 1 kept one list per word; version 2 lets a word sit in several lists. Lists' units already say which words they hold, so rebuild from them.
     db.version = 2;
@@ -347,6 +349,7 @@ const store = {
   exportJSON() {
     const copy = JSON.parse(JSON.stringify(db));
     copy.settings.deepseekKey = '';
+    copy.settings.bridgeToken = '';
     copy.apiLog = [];
     return JSON.stringify(copy);
   },
@@ -498,6 +501,17 @@ const inList = (w, name) => !name || Object.hasOwn(w.lists || {}, name);
 const STATE_LABEL = { new: 'New', learning: 'Learning', practicing: 'Practicing', memorized: 'Memorized' };
 const highlight = (text, word) => esc(text).replace(stemRe(word, 'gi'), m => `<mark>${m}</mark>`);
 
+/* ============================== AI providers ============================== */
+// DeepSeek is called directly with an API key. Codex and Claude Code run on the student's own computer through
+// bridge/acethewords-bridge.mjs, which uses the login (ChatGPT or Claude plan) the CLI already has.
+const BRIDGE_URL = 'http://127.0.0.1:7313/v1/chat/completions';
+const BRIDGE_SCRIPT = 'https://raw.githubusercontent.com/itsyuranwei/acethewords/main/bridge/acethewords-bridge.mjs';
+const PROVIDERS = {
+  deepseek: { name: 'DeepSeek', url: 'https://api.deepseek.com/chat/completions', key: s => s.deepseekKey },
+  codex: { name: 'Codex', cli: 'Codex CLI', plan: 'ChatGPT', url: BRIDGE_URL, key: s => s.bridgeToken },
+  claude: { name: 'Claude', cli: 'Claude Code', plan: 'Claude', url: BRIDGE_URL, key: s => s.bridgeToken },
+};
+
 /* ============================== API status ============================== */
 const VISION_MODELS = ['deepseek-flash'];
 const api = {
@@ -514,16 +528,20 @@ const api = {
     }
   },
   explain(status, msg = '') {
-    if (status === 0) return 'Could not connect. Check the internet connection.';
+    const p = gen.provider();
+    if (status === 0) return p.cli ? 'Could not reach the bridge. Is it running? (node acethewords-bridge.mjs)' : 'Could not connect. Check the internet connection.';
+    if (p.cli && status === 401) return 'The bridge token is wrong. Copy it again from the bridge window.';
+    if (p.cli && status === 503) return `${p.cli} is not installed on this computer.`;
+    if (p.cli && status >= 500) return `${p.cli} failed. Check that it is signed in (run it once in a terminal).`;
     if (status === 'parse') return 'Replied, but not in the expected format.';
     if (status === 400 || status === 422) return /model/i.test(msg) ? 'The model name in Settings is not accepted.' : 'The request was rejected.';
     if (status === 401 || status === 403) return 'The API key is wrong, expired or deleted.';
     if (status === 402) return 'The DeepSeek account has no balance left.';
     if (status === 429) return 'Too many requests at once. Wait a minute and retry.';
-    if (status >= 500) return 'DeepSeek is having problems right now. Try again later.';
+    if (status >= 500) return `${p.name} is having problems right now. Try again later.`;
     return 'Something went wrong.';
   },
-  lastDS() { return (db.apiLog || []).find(e => e.svc === 'DeepSeek'); },
+  lastDS() { return (db.apiLog || []).find(e => e.svc !== 'Dictionary'); },
   state() {
     if (!gen.hasKey()) return 'off';
     if (api.inFlight) return 'busy';
@@ -536,17 +554,18 @@ const api = {
     const st = api.state();
     el.className = 'apipill ' + st;
     el.querySelector('.lab').textContent = { off: ' off', busy: ' working', ok: ' ok', bad: ' error', idle: ' ready' }[st];
-    el.title = { off: 'No DeepSeek key', busy: 'Talking to DeepSeek…', ok: 'Last DeepSeek call worked', bad: 'Last DeepSeek call failed', idle: 'Key saved, no calls yet' }[st];
+    const n = gen.provider().name;
+    el.title = { off: 'AI not set up', busy: `Talking to ${n}…`, ok: `Last ${n} call worked`, bad: `Last ${n} call failed`, idle: 'Set up, no calls yet' }[st];
     if ($('#apiPanelBody')) $('#apiPanelBody').innerHTML = api.panelHtml();
   },
   panelHtml() {
     const st = api.state(), l = api.lastDS();
     const head = {
-      off: 'No DeepSeek key yet. Add one in Settings to get kid-friendly definitions, sentence questions and photo import.',
+      off: 'AI is not set up yet. Connect Codex, Claude Code or a DeepSeek key in Settings to get kid-friendly definitions, sentence questions and photo import.',
       busy: `Working… (${plural(api.inFlight, 'request')} in progress)`,
       ok: `Connected. Last call worked at ${l ? new Date(l.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}.`,
       bad: l ? `Last call failed: ${api.explain(l.status, l.msg)}` : '',
-      idle: 'Key saved. No calls made yet. Press “Test connection” to check it.',
+      idle: 'Set up. No calls made yet. Press “Test connection” to check it.',
     }[st];
     const failedWords = Object.values(db.words).filter(w => w.genStatus === 'error').length;
     const rows = (db.apiLog || []).slice(0, 25).map(e => `<div class="log-row">
@@ -554,7 +573,7 @@ const api = {
         <span><b>${esc(e.svc)}</b> · ${esc(e.what || '')}${e.ok ? '' : `<div class="err small">${esc(api.explain(e.status, e.msg))}</div><div class="muted small">${esc(String(e.msg || '').slice(0, 160))}</div>`}</span>
         <span class="${e.ok ? 'ok' : 'err'}">${e.ok ? '✓' : '✗'}${e.ms ? ` <span class="muted small">${(e.ms / 1000).toFixed(1)}s</span>` : ''}</span></div>`).join('');
     return `<div class="statusbox ${st}">${esc(head)}</div>
-      ${st === 'bad' && [401, 402, 403].includes(l?.status) ? `<p class="small">${l.status === 402 ? 'Top up the balance at platform.deepseek.com, then retry.' : 'Check the key in <a href="#settings" data-act="closeModal">Settings</a>.'}</p>` : ''}
+      ${st === 'bad' && [401, 402, 403].includes(l?.status) ? `<p class="small">${l.status === 402 ? 'Top up the balance at platform.deepseek.com, then retry.' : `Check the ${gen.provider().cli ? 'bridge token' : 'key'} in <a href="#settings" data-act="closeModal">Settings</a>.`}</p>` : ''}
       <div class="row">
         ${gen.hasKey() ? '<button class="btn sm" data-act="apiTest">Test connection</button>' : '<a class="btn sm primary" href="#settings" data-act="closeModal">Open Settings</a>'}
         ${failedWords && gen.hasKey() ? `<button class="btn sm" data-act="apiRetry">Retry ${plural(failedWords, 'failed word')}</button>` : ''}
@@ -604,12 +623,14 @@ const dict = {
   },
 };
 
-/* ============================== DeepSeek ============================== */
+/* ============================== question writing (AI) ============================== */
 const gen = {
-  hasKey() { return !!db.settings.deepseekKey.trim(); },
+  provider() { return PROVIDERS[db.settings.provider] || PROVIDERS.deepseek; },
+  hasKey() { return !!String(gen.provider().key(db.settings) || '').trim(); },
   // One request (retried on network errors, 429 and 5xx). Every outcome goes into the API log.
   async call(messages, maxTokens = 1800, { what = '', model = '', json = true } = {}) {
-    const useModel = model || db.settings.model || 'deepseek-flash';
+    const p = gen.provider();
+    const useModel = p.cli ? db.settings.provider : model || db.settings.model || 'deepseek-flash';
     const t0 = performance.now();
     api.inFlight++; api.paint();
     try {
@@ -620,7 +641,7 @@ const gen = {
           if (e.cutOff && attempt < 2) { maxTokens *= 2; continue; } // reply ran out of room: retry with double the limit
           const retryable = e.status === 0 || e.status === 429 || e.status >= 500;
           if (!retryable || attempt >= 2) {
-            api.log({ svc: 'DeepSeek', what, ok: false, status: e.status, msg: e.message, model: useModel });
+            api.log({ svc: p.name, what, ok: false, status: e.status, msg: e.message, model: useModel });
             throw e;
           }
           await sleep(1500 * 2 ** attempt);
@@ -631,11 +652,12 @@ const gen = {
   async request(messages, maxTokens, model, json, what, t0) {
     let res;
     try {
-      res = await fetch('https://api.deepseek.com/chat/completions', {
+      const p = gen.provider();
+      res = await fetch(p.url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + db.settings.deepseekKey.trim() },
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + String(p.key(db.settings)).trim() },
         // Thinking mode is on by default for DeepSeek V4 models; these short, structured jobs don't need it.
-        body: JSON.stringify({ model, messages, thinking: { type: 'disabled' }, ...(json ? { response_format: { type: 'json_object' } } : {}), temperature: 0.7, max_tokens: maxTokens }),
+        body: JSON.stringify(p.cli ? { model, messages } : { model, messages, thinking: { type: 'disabled' }, ...(json ? { response_format: { type: 'json_object' } } : {}), temperature: 0.7, max_tokens: maxTokens }),
       });
     } catch (e) {
       const err = new Error('Network error: ' + e.message); err.status = 0; throw err;
@@ -656,7 +678,7 @@ const gen = {
       const cutOff = j.choices?.[0]?.finish_reason === 'length';
       const err = new Error('Reply was not valid JSON' + (cutOff ? ' (cut off)' : '')); err.status = 'parse'; err.cutOff = cutOff; throw err;
     }
-    api.log({ svc: 'DeepSeek', what, ok: true, ms: Math.round(performance.now() - t0), model });
+    api.log({ svc: gen.provider().name, what, ok: true, ms: Math.round(performance.now() - t0), model });
     return out;
   },
   async test() {
@@ -759,7 +781,7 @@ ${instructions ? `Extra instructions from the parent or teacher (follow them): �
       const out = gen.validate(w, await gen.call(gen.prompt(w), 3000, { what: `Questions for “${w.word}”` }));
       if (out && (!best || out.complete)) best = out;
     }
-    if (!best?.simple_definition) throw new Error('DeepSeek returned unusable content');
+    if (!best?.simple_definition) throw new Error(`${gen.provider().name} returned unusable content`);
     const senses = info.senses(w).slice(0, 12);
     const s = senses[best.sense_index - 1];
     if (s && !w.primary.manual && !w.customDef) w.primary = { m: s.m, d: s.d, manual: false };
@@ -1665,7 +1687,7 @@ const modes = {
     };
     const allowed = families[type];
     const usable = words.filter(w => allowed.some(t => qfx.can(t, w)));
-    if (!usable.length) { toast(type === 'usage' || type === 'blank' ? 'These words need example sentences — add a DeepSeek key in Settings' : 'No words to drill'); return; }
+    if (!usable.length) { toast(type === 'usage' || type === 'blank' ? 'These words need example sentences — set up AI in Settings' : 'No words to drill'); return; }
     const titles = { meaning: 'Meaning drill', blank: 'Fill-in-the-blank drill', usage: 'Correct usage drill', card: 'Flashcards' };
     runner.start({
       title: titles[type], allowed,
@@ -1788,7 +1810,7 @@ const ui = {
   apiPanel() {
     $('#modal').innerHTML = `<div class="modal-back" data-act="closeModalBack"><div class="modal">
       <button class="iconbtn close" data-act="closeModal" aria-label="Close">✕</button>
-      <h2 style="margin-top:0">DeepSeek connection</h2>
+      <h2 style="margin-top:0">${esc(gen.provider().name)} connection</h2>
       <div id="apiPanelBody">${api.panelHtml()}</div></div></div>`;
   },
 
@@ -1870,7 +1892,7 @@ const ui = {
         return `<div class="card empty" style="margin-top:28px"><div class="emoji">📚</div><h1>Welcome to AceTheWords</h1>
           <p class="muted">Make a word list for each test or class — like “Lit Midterm” or “Unit 3 vocab”. The app looks up the meanings, then helps you remember them for good with short Learn, Practice and Review sessions.</p>
           <button class="btn primary big" data-act="newList">＋ Create your first list</button>
-          ${gen.hasKey() ? '' : `<p class="small muted" style="margin-top:16px">Tip: add a DeepSeek API key in <a href="#settings">Settings</a> for fill-in-the-blank and usage questions.</p>`}</div>`;
+          ${gen.hasKey() ? '' : `<p class="small muted" style="margin-top:16px">Tip: connect Codex, Claude Code or DeepSeek in <a href="#settings">Settings</a> for fill-in-the-blank and usage questions.</p>`}</div>`;
       }
       const td = plan.today();
       return `
@@ -1955,7 +1977,7 @@ const ui = {
             <button class="btn" data-act="startDrill" data-type="usage">✅ Correct usage</button>
             <button class="btn" data-act="startDrill" data-type="card">🃏 Flashcards</button>
           </div>
-          ${gen.hasKey() ? '' : `<p class="small muted">Fill-in-the-blank and usage work best with a DeepSeek key (<a href="#settings">Settings</a>).</p>`}
+          ${gen.hasKey() ? '' : `<p class="small muted">Fill-in-the-blank and usage work best with AI set up (<a href="#settings">Settings</a>).</p>`}
         </div>`;
     },
     review() {
@@ -2001,18 +2023,18 @@ const ui = {
           <label class="check small"><input type="checkbox" id="addShuffle"> Shuffle words before splitting into units</label>
           <div id="addPreview" class="small muted" style="margin:12px 0"></div>
           <button class="btn primary big" data-act="addSubmit">Add & look up</button>
-          ${gen.hasKey() ? '' : `<p class="small muted">No DeepSeek key yet — meanings come from the free dictionary. Add a key in <a href="#settings">Settings</a> for kid-friendly definitions and sentence questions.</p>`}
+          ${gen.hasKey() ? '' : `<p class="small muted">AI isn't set up — meanings come from the free dictionary. Connect Codex, Claude Code or DeepSeek in <a href="#settings">Settings</a> for kid-friendly definitions and sentence questions.</p>`}
         </div>
         <div class="card">
           <b style="font-size:17px">📷 Import from a photo</b>
-          <p class="small muted" style="margin:4px 0 10px">Take a photo of a vocabulary list, worksheet or textbook page. DeepSeek reads it and fills in the word box above so you can check it before adding. The photo is sent to DeepSeek.</p>
+          <p class="small muted" style="margin:4px 0 10px">Take a photo of a vocabulary list, worksheet or textbook page. The AI reads it and fills in the word box above so you can check it before adding. The photo is sent to ${esc(gen.provider().name)}.</p>
           ${gen.hasKey() ? `
           <input type="file" id="photoInput" accept="image/*" multiple>
           <div class="thumbs" id="photoThumbs">${ui.thumbsHtml()}</div>
           <label class="field"><span>Instructions (optional)</span><textarea id="photoPrompt" style="min-height:70px" placeholder="e.g. Only the words in bold. Skip the example sentences. Words 1–20 only.">${esc(ui.photoPrompt)}</textarea></label>
           <label class="check small"><input type="checkbox" id="photoMeanings" ${ui.photoMeanings ? 'checked' : ''}> Keep the meanings written in the photo</label>
           <div class="row" style="margin-top:12px"><button class="btn primary" data-act="readPhoto">Read photo</button><span id="photoStatus" class="small muted"></span></div>`
-          : `<p class="small">Needs a DeepSeek key — add one in <a href="#settings">Settings</a>.</p>`}
+          : `<p class="small">Needs AI — set it up in <a href="#settings">Settings</a>.</p>`}
           <details style="margin-top:14px"><summary>Use another AI instead (ChatGPT, Claude, Gemini…)</summary>
             <p class="small muted" style="margin:4px 0 8px">Copy this prompt, paste it into the other AI together with the photo, then paste its answer into the word box above.</p>
             <textarea id="otherAiPrompt" readonly style="min-height:220px;font-size:13px">${esc(otherAiPrompt())}</textarea>
@@ -2033,18 +2055,34 @@ const ui = {
         <div class="card" id="wordRows" style="padding:6px 14px">${ui.wordRowsHtml()}</div>`;
     },
     settings() {
-      const s = db.settings;
+      const s = db.settings, p = gen.provider();
       return `<h1>Settings</h1>
         <div class="card">
-          <h2 style="margin-top:0">DeepSeek API</h2>
-          <p class="small muted">Used once per word to write kid-friendly definitions, fill-in-the-blank sentences and usage questions (they are saved, so studying makes no calls), and to read photos of word lists. Your key is saved only in this browser on this device and is never included in exports.</p>
+          <h2 style="margin-top:0">AI</h2>
+          <p class="small muted">Used once per word to write kid-friendly definitions, fill-in-the-blank sentences and usage questions (they are saved, so studying makes no calls), and to read photos of word lists.</p>
+          <label class="field"><span>Connect with</span><select data-set="provider">
+            ${[['codex', 'Codex — use your ChatGPT plan'], ['claude', 'Claude Code — use your Claude plan'], ['deepseek', 'DeepSeek — API key']]
+              .map(([v, l]) => `<option value="${v}" ${v === s.provider ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+          ${p.cli ? `
+          <p class="small">Uses the ${p.cli} login you already have, so it counts against your ${p.plan} plan and needs no API key. A web page can't start programs, so a small bridge runs on your computer while you use the app.</p>
+          <ol class="tight small">
+            <li>Install ${p.cli} and sign in once by running <code>${s.provider}</code> in a terminal.</li>
+            <li>With Node.js 18 or newer installed, run this in a terminal and leave it open:
+              <div class="row" style="flex-wrap:nowrap;margin:6px 0"><code id="bridgeCmd" style="overflow-wrap:anywhere">curl -fsSLO ${BRIDGE_SCRIPT} &amp;&amp; node acethewords-bridge.mjs</code><button class="btn sm" data-act="copyBridgeCmd">Copy</button></div>
+              Or <a href="https://github.com/itsyuranwei/acethewords/blob/main/bridge/acethewords-bridge.mjs" target="_blank" rel="noopener">download the bridge</a> and run <code>node acethewords-bridge.mjs</code> in its folder.</li>
+            <li>Paste the token the bridge prints:</li>
+          </ol>
+          <label class="field"><span>Bridge token</span><input type="password" data-set="bridgeToken" value="${esc(s.bridgeToken)}" placeholder="Paste the token here" autocomplete="off"></label>
+          <p class="small muted">The token is saved only in this browser and is never included in exports. The bridge only answers requests that carry it, and runs ${p.cli} with no tools in an empty folder. If the browser asks to allow access to devices on your local network, allow it.</p>`
+          : `
+          <p class="small muted">Your key is saved only in this browser on this device and is never included in exports.</p>
           <label class="field"><span>API key</span><div class="row" style="flex-wrap:nowrap"><input type="password" id="keyInput" data-set="deepseekKey" value="${esc(s.deepseekKey)}" placeholder="sk-…" autocomplete="off"><button class="btn sm" data-act="toggleKey">Show</button></div></label>
           <label class="field"><span>Model</span><select data-set="model">
             ${[['deepseek-flash', 'deepseek-flash — V4.1 Flash (recommended, reads photos)'], ['deepseek-v4-pro', 'deepseek-v4-pro — V4 Pro (stronger writing, ~3× cost, no photos)'],
               ...(['deepseek-flash', 'deepseek-v4-pro'].includes(s.model) ? [] : [[s.model, s.model + ' (custom)']])]
-              .map(([v, l]) => `<option value="${esc(v)}" ${v === s.model ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
-          <div class="row"><button class="btn" data-act="testKey">Test key</button><button class="btn" data-act="genMissing">Generate missing content</button>${gen.outdated().length ? `<button class="btn" data-act="regenOutdated">Rewrite older questions (${gen.outdated().length})</button>` : ''}<span id="keyStatus" class="small muted"></span></div>
-          ${gen.outdated().length ? `<p class="small muted">${plural(gen.outdated().length, 'word')} still ${gen.outdated().length === 1 ? 'has' : 'have'} questions from an older, easier prompt. Rewriting makes one DeepSeek request per word; progress is kept.</p>` : ''}
+              .map(([v, l]) => `<option value="${esc(v)}" ${v === s.model ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`}
+          <div class="row"><button class="btn" data-act="testKey">${p.cli ? 'Test connection' : 'Test key'}</button><button class="btn" data-act="genMissing">Generate missing content</button>${gen.outdated().length ? `<button class="btn" data-act="regenOutdated">Rewrite older questions (${gen.outdated().length})</button>` : ''}<span id="keyStatus" class="small muted"></span></div>
+          ${gen.outdated().length ? `<p class="small muted">${plural(gen.outdated().length, 'word')} still ${gen.outdated().length === 1 ? 'has' : 'have'} questions from an older, easier prompt. Rewriting makes one AI request per word; progress is kept.</p>` : ''}
         </div>
         <div class="card">
           <h2 style="margin-top:0">Student</h2>
@@ -2229,7 +2267,7 @@ const ui = {
         ${g ? `<div class="small"><b>Fill in the blank</b><ul class="tight">${g.blank_sentences.map(s => `<li>${esc(s)}</li>`).join('')}</ul>
           <b>Correct usage</b><ul class="tight">${g.correct_usages.map(s => `<li>${esc(s)}</li>`).join('')}</ul>
           <b>Incorrect usage</b><ul class="tight">${g.incorrect_usages.map(s => `<li>${esc(s.sentence)} <span class="muted">— ${esc(s.why)}</span></li>`).join('')}</ul></div>`
-          : `<p class="small muted">${gen.hasKey() ? 'Click Regenerate to write them.' : 'Add a DeepSeek key in Settings to generate them.'}</p>`}
+          : `<p class="small muted">${gen.hasKey() ? 'Click Regenerate to write them.' : 'Set up AI in Settings to generate them.'}</p>`}
         ${gen.hasKey() ? `<button class="btn sm" data-act="regen" data-w="${esc(key)}">${g ? 'Regenerate' : 'Generate'}</button>` : ''}
       </details>
       <details><summary>Memory stats</summary>
@@ -2328,7 +2366,7 @@ const ui = {
       store.save(); ui.refreshAdd();
     });
     for (const w of ws) if (w.genStatus === 'working') w.genStatus = 'none';
-    if (fatal) { api.lastToast = 0; toast(`DeepSeek: ${api.explain(fatal.status)} Stopped writing questions.`, 'bad'); }
+    if (fatal) { api.lastToast = 0; toast(`${gen.provider().name}: ${api.explain(fatal.status)} Stopped writing questions.`, 'bad'); }
   },
   async addSubmit() {
     const items = parseInput($('#addText').value);
@@ -2450,7 +2488,7 @@ const ui = {
     addSubmit: () => ui.addSubmit(),
     readPhoto: () => ui.readPhoto(),
     recommendedSettings: () => {
-      const { deepseekKey, model, ...rec } = DEFAULT_SETTINGS;
+      const { provider, deepseekKey, bridgeToken, model, ...rec } = DEFAULT_SETTINGS;
       Object.assign(db.settings, rec); store.save(); ui.render(); toast('Recommended settings applied', 'good');
     },
     copyPrompt: async el => {
@@ -2478,25 +2516,30 @@ const ui = {
       toast(`Retrying ${plural(ws.length, 'word')}…`);
       await ui.runLookups(ws); toast('Done', 'good');
     },
+    copyBridgeCmd: async el => {
+      const cmd = $('#bridgeCmd').textContent;
+      try { await navigator.clipboard.writeText(cmd); el.textContent = '✓ Copied'; } catch { el.textContent = 'Select and copy it'; }
+      setTimeout(() => { el.textContent = 'Copy'; }, 1800);
+    },
     toggleKey: el => { const i = $('#keyInput'); i.type = i.type === 'password' ? 'text' : 'password'; el.textContent = i.type === 'password' ? 'Show' : 'Hide'; },
     testKey: async () => {
       const st = $('#keyStatus');
-      if (!gen.hasKey()) { st.textContent = 'Enter a key first.'; return; }
+      if (!gen.hasKey()) { st.textContent = gen.provider().cli ? 'Paste the bridge token first.' : 'Enter a key first.'; return; }
       st.textContent = 'Testing…';
-      try { st.innerHTML = (await gen.test()) ? '<span class="ok">✓ Key works</span>' : '<span class="err">Unexpected reply</span>'; }
+      try { st.innerHTML = (await gen.test()) ? `<span class="ok">✓ ${gen.provider().cli ? 'Connected' : 'Key works'}</span>` : '<span class="err">Unexpected reply</span>'; }
       catch (e) { st.innerHTML = `<span class="err">✗ ${esc(api.explain(e.status, e.message))}</span> <span class="muted">${esc(e.message)}</span>`; }
     },
     genMissing: async () => {
-      if (!gen.hasKey()) { toast('Add a DeepSeek key first'); return; }
+      if (!gen.hasKey()) { toast('Set up AI in Settings first'); return; }
       const ws = Object.values(db.words).filter(w => info.def(w) && !w.gen?.complete);
       if (!ws.length) { toast('Every word already has practice sentences'); return; }
       const n = await ui.bulkGen(ws);
       $('#keyStatus') && ($('#keyStatus').textContent = `Done: ${n}/${ws.length} complete.`);
     },
     regenOutdated: async el => {
-      if (!gen.hasKey()) { toast('Add a DeepSeek key first'); return; }
+      if (!gen.hasKey()) { toast('Set up AI in Settings first'); return; }
       const ws = gen.outdated();
-      if (!ws.length || !confirm(`Rewrite the questions for ${plural(ws.length, 'word')} with the newer, harder prompt?\n\nThis makes ${plural(ws.length, 'DeepSeek request')}. Memory progress is kept, and a word keeps its old questions if its rewrite fails.`)) return;
+      if (!ws.length || !confirm(`Rewrite the questions for ${plural(ws.length, 'word')} with the newer, harder prompt?\n\nThis makes ${plural(ws.length, `${gen.provider().name} request`)}. Memory progress is kept, and a word keeps its old questions if its rewrite fails.`)) return;
       el.disabled = true;
       const n = await ui.bulkGen(ws);
       const failed = ws.filter(w => (w.genVer || 1) < gen.VERSION).length;
@@ -2516,8 +2559,8 @@ const ui = {
     },
     resetAll: () => {
       if (!confirm('Erase all words, lists and progress? This cannot be undone. (Export a backup first if unsure.)')) return;
-      const key = db.settings.deepseekKey;
-      db = store.blank(); db.settings.deepseekKey = key; store.save(); ui.go('home');
+      const { provider, deepseekKey, bridgeToken } = db.settings;
+      db = store.blank(); Object.assign(db.settings, { provider, deepseekKey, bridgeToken }); store.save(); ui.go('home');
     },
   },
   onImport(e) {
@@ -2553,14 +2596,15 @@ const ui = {
       let v = t.type === 'checkbox' ? t.checked : t.value;
       if (SETTING_LIMITS[k]) { v = clamp(Math.round(Number(v) || DEFAULT_SETTINGS[k]), ...SETTING_LIMITS[k]); t.value = v; }
       if (k === 'retention') v = clamp(Number(v), 0.8, 0.95);
-      if (k === 'deepseekKey' || k === 'model') v = String(v).trim();
+      if (k === 'deepseekKey' || k === 'bridgeToken' || k === 'model') v = String(v).trim();
       db.settings[k] = v; store.save();
-      if (k === 'deepseekKey') toast(v ? 'Key saved in this browser' : 'Key removed');
+      if (k === 'deepseekKey' || k === 'bridgeToken') toast(v ? `${k === 'bridgeToken' ? 'Token' : 'Key'} saved in this browser` : `${k === 'bridgeToken' ? 'Token' : 'Key'} removed`);
+      if (k === 'provider') ui.render();
     }
     if (t.id === 'addShuffle') ui.updateAddPreview();
     if (t.id === 'photoMeanings') ui.photoMeanings = t.checked;
     if (t.id === 'photoInput') ui.addPhotos(t.files).then(() => { t.value = ''; });
-    if (t.dataset.set === 'deepseekKey' || t.dataset.set === 'model') api.paint();
+    if (['provider', 'deepseekKey', 'bridgeToken', 'model'].includes(t.dataset.set)) api.paint();
   },
   stale() {
     if (store.stale) return;
