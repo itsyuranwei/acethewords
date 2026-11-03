@@ -569,7 +569,7 @@ const ui = {
           <div class="small muted">Recent: ${m.history.slice(-12).map(h => `<span title="${TYPE_LABEL[h.type]}">${h.g === 1 ? '✗' : '✓'}</span>`).join(' ')}</div>`
           : '<p class="small muted">Not studied yet.</p>'}
       </details>
-      <div class="row" style="margin-top:16px"><button class="btn sm" data-act="resetWord" data-w="${esc(key)}">Reset progress</button><button class="btn sm danger" data-act="deleteWord" data-w="${esc(key)}">${Object.keys(w.lists).length > 1 ? 'Delete from all lists' : 'Delete word'}</button></div>
+      <div class="row" style="margin-top:16px">${info.studyable(w) ? `<button class="btn sm" data-act="markKnown" data-w="${esc(key)}" ${known.markedToday(w) ? 'disabled title="Already marked today — come back tomorrow"' : 'title="Counts as a good review: the word gets stronger and its next review moves later"'}>✓ I know this word</button>` : ''}<button class="btn sm" data-act="resetWord" data-w="${esc(key)}">Reset progress</button><button class="btn sm danger" data-act="deleteWord" data-w="${esc(key)}">${Object.keys(w.lists).length > 1 ? 'Delete from all lists' : 'Delete word'}</button></div>
     </div></div>`;
     askai.sync();
   },
@@ -780,7 +780,7 @@ const ui = {
     askToggle: el => { askai.toggle(); if (el.tagName === 'A') location.hash = el.getAttribute('href'); },
     askClear: () => { askai.msgs = []; askai.render(); },
     askChip: el => { const c = askai.chips(askai.word())[Number(el.dataset.i)]; if (c) askai.send(c.ask, c.label); },
-    askSend: () => askai.send($('#askInput')?.value),
+    askSend: () => askai.submit($('#askInput')?.value),
     setPrimary: el => {
       const w = db.words[el.dataset.w];
       w.primary = { m: Number(el.dataset.m), d: Number(el.dataset.d), manual: true };
@@ -801,6 +801,8 @@ const ui = {
       catch { /* the API log shows the error */ }
       if ($('#modal').innerHTML) ui.openWord(w.word);
     },
+    markKnown: el => { if (known.mark(db.words[el.dataset.w])) { ui.openWord(el.dataset.w); ui.render(); } },
+    introKnown: () => runner.introKnown(),
     resetWord: el => {
       if (!confirm('Reset all progress for this word?')) return;
       db.words[el.dataset.w].mem = newMem(); store.save(); ui.openWord(el.dataset.w); ui.render();
@@ -1039,7 +1041,7 @@ const ui = {
   onKey(e) {
     if (store.stale) return;
     if (e.target.id === 'askInput') {
-      if (e.key === 'Enter') { e.preventDefault(); askai.send(e.target.value); } else if (e.key === 'Escape') askai.toggle();
+      if (e.key === 'Enter') { e.preventDefault(); askai.submit(e.target.value); } else if (e.key === 'Escape') askai.toggle();
       return;
     }
     if (e.target.matches?.('input, textarea, select')) {
@@ -1070,6 +1072,7 @@ const ui = {
     const c = s.cur;
     if (!c) { if (k === 'enter' || k === ' ') { e.preventDefault(); runner.exit(); } return; }
     if (c.q.kind === 'intro' && (k === ' ' || k === 'enter')) { e.preventDefault(); runner.introNext(); return; }
+    if (c.q.kind === 'intro' && k === 'k') { runner.introKnown(); return; }
     if (c.q.kind === 'card') {
       if (!c.flipped && (k === ' ' || k === 'enter')) { e.preventDefault(); runner.flip(); return; }
       if (c.flipped && '1234'.includes(k) && k.length === 1) { runner.rate(Number(k)); return; }

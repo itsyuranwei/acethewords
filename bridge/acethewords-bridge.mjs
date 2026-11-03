@@ -33,14 +33,19 @@ const TOKEN = loadToken();
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
 
 // Splits OpenAI-style chat messages into a system prompt, the user's text and any images (data URLs).
+// The CLIs take a single prompt, so a conversation (one with earlier replies) is written out as a transcript with each turn
+// labelled; joined without labels, the model can't tell its own earlier replies from the user's question and answers the wrong one.
 function readMessages(messages) {
   if (!Array.isArray(messages) || !messages.length) throw new HttpError(400, 'messages must be a non-empty array');
   const system = [], text = [], images = [];
+  const chat = messages.some(m => m?.role === 'assistant');
   for (const m of messages) {
     const parts = typeof m?.content === 'string' ? [{ type: 'text', text: m.content }] : Array.isArray(m?.content) ? m.content : [];
     for (const p of parts) {
-      if (p?.type === 'text' && typeof p.text === 'string') (m.role === 'system' ? system : text).push(p.text);
-      else if (p?.type === 'image_url') {
+      if (p?.type === 'text' && typeof p.text === 'string') {
+        if (m.role === 'system') system.push(p.text);
+        else text.push(chat ? `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${p.text}` : p.text);
+      } else if (p?.type === 'image_url') {
         const hit = /^data:(image\/(?:png|jpeg|gif|webp));base64,([A-Za-z0-9+/=]+)$/.exec(p.image_url?.url || '');
         if (!hit) throw new HttpError(400, 'images must be base64 data URLs (png, jpeg, gif or webp)');
         images.push({ type: hit[1], data: hit[2] });
@@ -48,6 +53,7 @@ function readMessages(messages) {
     }
   }
   if (!text.length) throw new HttpError(400, 'no user text in messages');
+  if (chat) text.unshift('The conversation so far is below. Reply to the last User message only, as the Assistant, without a label.');
   return { system: system.join('\n\n'), text: text.join('\n\n'), images };
 }
 
