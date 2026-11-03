@@ -1,7 +1,7 @@
 <h1 align="center">AceTheWords</h1>
 
 <p align="center"><b>Learn vocabulary for good — before the test.</b><br>
-A free, single-file web app that looks up your words, quizzes you, and schedules reviews right before you'd forget.</p>
+A free web app that runs in your browser, looks up your words, quizzes you, and schedules reviews right before you'd forget.</p>
 
 <p align="center">
   <a href="docs/AceTheWords-User-Manual.pdf"><img alt="Read the User Manual (PDF)" src="https://img.shields.io/badge/%F0%9F%93%98%20READ%20THE%20USER%20MANUAL-PDF-5b5bd6?style=for-the-badge"></a>
