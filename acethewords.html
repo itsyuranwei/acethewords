@@ -262,6 +262,7 @@ mark { background: color-mix(in srgb, var(--st-learning) 35%, transparent); colo
 <div id="session" hidden></div>
 <div id="modal"></div>
 <div id="toasts"></div>
+<div id="stale"></div>
 <input type="file" id="importFile" accept="application/json,.json" hidden>
 
 <script>
@@ -332,7 +333,9 @@ const store = {
     units.adoptOrphans();
     return db;
   },
+  stale: false,
   save() {
+    if (store.stale) return; // another tab has newer data; saving here would overwrite it
     try { localStorage.setItem(KEY, JSON.stringify(db)); }
     catch { toast('Could not save — browser storage is full or blocked', 'bad'); }
   },
@@ -1756,6 +1759,9 @@ const ui = {
       if (s.view != null) s.viewT0 += gone;
       else if (s.cur && !s.cur.answered && !s.cur.flipped) s.cur.t0 += gone;
     });
+    // Another tab or window saved progress. This tab's copy is now out of date, so it stops saving
+    // (it would overwrite that progress) until it reloads the latest data.
+    window.addEventListener('storage', e => { if (e.key === KEY || e.key === null) ui.stale(); });
     document.addEventListener('click', ui.onClick);
     document.addEventListener('keydown', ui.onKey);
     document.addEventListener('input', ui.onInput);
@@ -2406,6 +2412,7 @@ const ui = {
     },
     removePhoto: el => { ui.photos.splice(Number(el.dataset.i), 1); $('#photoThumbs').innerHTML = ui.thumbsHtml(); },
     apiPanel: () => ui.apiPanel(),
+    reloadStale: () => location.reload(),
     apiTest: async el => { el.disabled = true; try { await gen.test(); } catch { /* logged */ } },
     apiRetry: async () => { const ws = Object.values(db.words).filter(w => w.genStatus === 'error'); await ui.runGen(ws); store.save(); api.paint(); },
     apiClear: () => { db.apiLog = []; store.save(); api.paint(); },
@@ -2506,7 +2513,19 @@ const ui = {
     if (t.id === 'photoInput') ui.addPhotos(t.files).then(() => { t.value = ''; });
     if (t.dataset.set === 'deepseekKey' || t.dataset.set === 'model') api.paint();
   },
+  stale() {
+    if (store.stale) return;
+    store.stale = true;
+    // Everything behind the dialog stops taking focus and keys, so nothing can be answered while saving is off.
+    document.querySelectorAll('body > :not(#stale)').forEach(el => { el.inert = true; });
+    $('#stale').innerHTML = `<div class="modal-back" style="z-index:70"><div class="modal" style="max-width:440px">
+      <h2 style="margin-top:0">AceTheWords is open somewhere else</h2>
+      <p class="muted">It was just used in another tab or window. This tab has paused so it doesn't overwrite that progress.</p>
+      <button class="btn primary" data-act="reloadStale">Use it here</button></div></div>`;
+    $('#stale button').focus();
+  },
   onKey(e) {
+    if (store.stale) return;
     if (e.target.matches?.('input, textarea, select')) {
       // Enter in a modal's text field presses its main button.
       if (e.key === 'Enter' && e.target.tagName === 'INPUT') { const b = $('#modal [data-enter]'); if (b) { e.preventDefault(); b.click(); } }
