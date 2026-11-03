@@ -2507,6 +2507,7 @@ const ui = {
         <button data-act="editList" ${d}>✏️ Edit list</button>
         <button data-act="exportList" ${d} title="Save this list as a .atw file">📤 Export (.atw)</button>
         <button data-act="${l.archived ? 'unarchiveList' : 'archiveList'}" ${d}>🗄️ ${l.archived ? 'Unarchive' : 'Archive'}</button>
+        <button data-act="resetList" ${d}>↺ Reset progress</button>
         <button class="danger" data-act="deleteList" ${d}>🗑️ Delete list</button>
       </div></div>`;
   },
@@ -2515,6 +2516,23 @@ const ui = {
       if (w === except) return;
       w.querySelector('.menu').hidden = true; w.querySelector('[aria-expanded]')?.setAttribute('aria-expanded', 'false');
     });
+  },
+  // Sends every word in the list back to New. A word has one progress record however many lists it is in,
+  // so words shared with other lists reset there too, and the dialog says so.
+  resetListModal(n) {
+    const ws = uniq(db.lists[n].units.flat()).map(k => db.words[k]).filter(Boolean);
+    const studied = ws.filter(w => w.mem.reps), shared = studied.filter(w => Object.keys(w.lists).length > 1).length;
+    if (!studied.length) { toast('Nothing to reset: no words in this list have been studied yet'); return; }
+    $('#modal').innerHTML = `<div class="modal-back" data-act="closeModalBack"><div class="modal" style="max-width:460px">
+      <button class="iconbtn close" data-act="closeModal" aria-label="Close">✕</button>
+      <h2 style="margin-top:0">Reset progress for “${esc(n)}”?</h2>
+      <p>${plural(studied.length, 'studied word')} go${studied.length === 1 ? 'es' : ''} back to New, and the units lock again from Unit 1. Meanings and practice questions are kept.</p>
+      ${shared ? `<p><b>${shared} of these words ${shared === 1 ? 'is' : 'are'} also in other lists</b>, so ${shared === 1 ? 'its' : 'their'} progress resets there too.</p>` : ''}
+      <p class="small muted">Want a copy first? <b>Export</b> saves the list with its progress.</p>
+      <div class="row" style="margin-top:14px"><button class="btn danger-solid" data-act="resetListConfirm" data-list="${esc(n)}">Reset progress</button>
+        <button class="btn" data-act="exportList" data-list="${esc(n)}">Export first</button><span class="spacer"></span><button class="btn ghost" data-act="closeModal">Cancel</button></div>
+    </div></div>`;
+    $('#modal .btn.ghost').focus();
   },
   // Deleting takes two steps: what will be lost (with safer options), then a final "can't be undone".
   deleteListModal(n, step = 1) {
@@ -2735,6 +2753,15 @@ const ui = {
       ui.closeMenus(wrap);
       menu.hidden = !menu.hidden; el.setAttribute('aria-expanded', String(!menu.hidden));
       if (!menu.hidden) menu.querySelector('button')?.focus();
+    },
+    resetList: el => ui.resetListModal(el.dataset.list),
+    resetListConfirm: el => {
+      const n = el.dataset.list, l = db.lists[n]; if (!l) return;
+      const keys = uniq(l.units.flat()).filter(k => db.words[k]);
+      for (const k of keys) db.words[k].mem = newMem();
+      l.unlocked = 1; l.newLog = null;
+      store.save(); ui.closeModal(); ui.render();
+      toast(`Progress reset for “${n}”`, 'good');
     },
     deleteList: el => ui.deleteListModal(el.dataset.list, 1),
     deleteListNext: el => ui.deleteListModal(el.dataset.list, 2),
