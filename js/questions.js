@@ -50,7 +50,7 @@ const FALLBACK = [
 const TYPE_LABEL = {
   intro: 'New word', card: 'Flashcard', meanEasy: 'Pick the meaning', wordEasy: 'Pick the word',
   meanHard: 'Pick the meaning', blankEasy: 'Fill in the blank', wordHard: 'Pick the word',
-  blankHard: 'Fill in the blank', usage: 'Correct usage',
+  blankHard: 'Fill in the blank', usage: 'Correct usage', known: 'Marked as known',
 };
 const FALLBACK_CHAIN = {
   usage: ['blankHard', 'wordHard', 'meanHard', 'meanEasy'], blankHard: ['blankEasy', 'wordHard', 'meanHard', 'meanEasy'],
@@ -219,7 +219,8 @@ function record(w, grade, type, ms) {
   const S0 = w.mem.S;
   const z = rt.z(type, ms), fast = db.settings.useSpeed && rt.rapid(type, ms);
   // Later-day answers train the speed model: what FSRS predicted plus how the previous answer went → right or wrong now.
-  if (!wasNew && w.mem.lastDay !== todayKey()) model.learn(mem.Rnow(w), w.mem.history.at(-1), grade > 1 ? 1 : 0);
+  // A self-marked "I know this" has no answer speed, so it doesn't count as the previous answer.
+  if (!wasNew && w.mem.lastDay !== todayKey() && w.mem.history.at(-1)?.type !== 'known') model.learn(mem.Rnow(w), w.mem.history.at(-1), grade > 1 ? 1 : 0);
   mem.review(w, grade, type, ms);
   Object.assign(w.mem.history.at(-1), { z: z == null ? null : +z.toFixed(2), fast });
   // A possible guess doesn't prove mastery.
@@ -242,3 +243,22 @@ function record(w, grade, type, ms) {
   store.save();
   return w.mem.S > S0;
 }
+
+/* ============================== "I know this word" ============================== */
+// The student says they know a word: counted as an Easy review, so it gets stronger and comes back later.
+// It never makes a word Memorized on its own (that still takes a hard question answered right), and it
+// doesn't train the speed model, count toward the daily goal or the streak. Once a day per word, so
+// tapping it again can't keep stretching the gap.
+const known = {
+  markedToday: w => w.mem.history.some(h => h.type === 'known' && dayKey(h.t) === todayKey()),
+  mark(w) {
+    if (known.markedToday(w)) return false;
+    const wasNew = !w.mem.reps;
+    mem.review(w, 4, 'known', 0);
+    if (wasNew) plan.countNew(inList(w, ui.scope) && ui.scope ? ui.scope : w.list);
+    toast(`👍 “${w.word}” marked as known — next review ${fmtDay(dayKey(plan.dueAt(w)))}`, 'good');
+    for (const n of Object.keys(w.lists)) if (units.autoUnlock(n)) toast(`🔓 A new unit in “${n}” is unlocked!`, 'good');
+    store.save();
+    return true;
+  },
+};

@@ -86,6 +86,15 @@ const runner = {
     return runner.s?.past.length ? ` · ${arrow ? '←' : 'Backspace'} previous word` : '';
   },
   introNext() { const s = runner.s; if (s?.cur?.q.kind === 'intro') { s.done++; runner.next(); } },
+  // "I already know this" on a new word: mark it known and drop its quick checks from this session.
+  introKnown() {
+    const s = runner.s, c = s?.cur;
+    if (c?.q.kind !== 'intro' || !known.mark(c.w)) return;
+    const k = c.w.word, keep = it => it.key !== k;
+    s.queue = s.queue.filter(keep); s.stages = s.stages.map(st => st.filter(keep));
+    (s.known ||= new Set()).add(k);
+    s.done++; runner.next();
+  },
   result(grade, ok, ms) {
     const s = runner.s, c = s.cur;
     const stronger = record(c.w, grade, c.q.type, ms);
@@ -134,7 +143,7 @@ const runner = {
         </div>
         <div class="card">
           ${keys.map(k => { const w = db.words[k]; if (!w) return ''; const b = byWord[k]; const st = info.state(w);
-            return `<div class="sum-row"><div><b>${esc(w.word)}</b> <span class="muted small">${b ? `${b.ok}/${b.n} correct` : 'introduced'}</span></div>
+            return `<div class="sum-row"><div><b>${esc(w.word)}</b> <span class="muted small">${b ? `${b.ok}/${b.n} correct` : s.known?.has(k) ? 'marked as known' : 'introduced'}</span></div>
               <span class="chip ${st}">${STATE_LABEL[st]}</span>
               <div class="bar thin" title="Progress to memorized"><span style="width:${Math.round(info.progress(w) * 100)}%;background:var(--st-${st})"></span></div></div>`; }).join('')}
         </div>
@@ -189,8 +198,8 @@ const runner = {
   renderIntro(w, viewing = false) {
     return `<div class="qtype">${TYPE_LABEL.intro}</div>
       <div class="flash">${runner.wordHead(w)}<div class="back" style="margin-top:14px;padding-top:14px">${runner.wordFacts(w)}</div></div>
-      ${viewing ? '' : `<div class="row" style="justify-content:center;margin-top:20px"><button class="btn primary big" data-act="introNext" data-nav>Got it — next</button></div>
-      <div class="keyhint">Space, Enter or → to continue${runner.prevHint()}</div>`}`;
+      ${viewing ? '' : `<div class="row" style="justify-content:center;margin-top:20px"><button class="btn ghost big" data-act="introKnown" title="Skip its practice for now: counts as an easy review">✓ I already know this</button><button class="btn primary big" data-act="introNext" data-nav>Got it — next</button></div>
+      <div class="keyhint">Space, Enter or → to continue · K if you already know it${runner.prevHint()}</div>`}`;
   },
   renderCard(w, c, viewing = false) {
     const flipped = c.flipped || viewing;
